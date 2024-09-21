@@ -1,0 +1,5 @@
+cached_art.json
+options.json
+config.json
+/node_modules/*
+package-lock.json

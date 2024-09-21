@@ -1,0 +1,21 @@
+{
+    "artUploadMethod": "musicbrainz",
+    "preferredRoonZone": "",
+    "preferredRoonImgSize": {
+        "width": 768,
+        "height": 768
+    },
+    "selfServiceImage": {
+        "formImageKey": "file",
+        "formImageType": "image",
+        "endpointUrl": "",
+        "endpointAuthToken": "",
+        "endpointAuthTokenType": ""
+    },
+    "imgurImage": {
+        "imgurUrl": "https://api.imgur.com/3/image",
+        "imgurFileType": "raw",
+        "imgurClientId": "",
+        "imgurUploadKey": "image"
+    }
+}
