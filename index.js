@@ -59,7 +59,7 @@ if (fs.existsSync('options.json')) {
     configParams = JSON.parse(fs.readFileSync('options.json', 'utf8'));
     configValidate()
 } else {
-    const response = await axios.get("https://raw.githubusercontent.com/prolix-oc/RoonRPCJS/raw/refs/heads/main/options-default.json", { responseType: 'arraybuffer' });
+    const response = await axios.get("https://raw.githubusercontent.com/prolix-oc/RoonCordJS/refs/heads/master/options-default.json", { responseType: 'arraybuffer' });
     if (response.status == 200){
         const fileData = Buffer.from(response.data, 'binary');
         outputLog(logTypes.ok, 'Downloaded standard options file from GitHub...');
