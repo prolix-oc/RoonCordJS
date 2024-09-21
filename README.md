@@ -11,7 +11,7 @@
 
     - <b>Imgur:</b> If you signed up [for an OAuth 2 application,](https://api.imgur.com/oauth2/addclient) you can easily add your client ID and start uploading album art
 
-    - <b>Self-hosting:</b> If you want to run your own ingest using the cloud or local infrastructure, I've got a sample project with optional Bearer token auth ready to go! It also runs off of NodeJS, with fully self-contained Express.js REST/file serving endpoints.
+    - <b>Self-hosting:</b> If you want to run your own ingest using the cloud or local infrastructure, [I've got a sample project](https://github.com/prolix-oc/RoonCordJS-Server) with Bearer token auth ready to go! It also runs off of NodeJS, with fully self-contained Express.js REST/file serving endpoints.
 
     - <b>MusicBrainz:</b> If you don't want to do any of that nonsense, just let MusicBrainz match your cover art! Not always guaranteed to be accurate though, especially with more niche tracks or self-tagged libraries.
 
