@@ -254,6 +254,8 @@ extension.on("subscribe_zones", (core, response, body) => {
     });
 });
 
+//figure out if we're played or paused to update the small image
+
 function determinePlaybackStatus() {
     var playStatus = trackInfo["playback_status"];
     switch (trackInfo["playback_status"]) {
@@ -273,6 +275,8 @@ client.on("error", async (err) => {
     outputLog(logTypes.err, "Error from Discord RPC interface:\n" + err);
 });
 
+//initial RPC call
+
 client.on("ready", async () => {
     await client.user?.setActivity({
         state: trackInfo["artist"] + " — " + trackInfo["album"],
@@ -287,6 +291,8 @@ client.on("ready", async () => {
     });
 });
 
+//function to make repeated RPC calls
+
 async function updateRPC(artlink) {
     await client.user?.setActivity({
         state: trackInfo["artist"] + " — " + trackInfo["album"],
@@ -300,6 +306,8 @@ async function updateRPC(artlink) {
         type: 2
     });
 }
+
+//let's figure out what the user preferred for album art, and go from there.
 
 async function startAlbumArtOperation(albumartString, albumInput, artistString, reason) {
     const found = await findInCache(cachedArt, albumInput);
@@ -338,6 +346,8 @@ async function startAlbumArtOperation(albumartString, albumInput, artistString, 
     }
 };
 
+//convoluted MusicBrainz to Cover Art Archive search function
+
 async function fetchFromMusicBrainz(artistString, albumInput, callback) {
     outputLog(logTypes.info, "Returning match from MusicBrainz to RPC.")
     const encodedArtist = encodeURIComponent(artistString);
@@ -361,13 +371,15 @@ async function fetchFromMusicBrainz(artistString, albumInput, callback) {
     })
 }
 
+//let's give Imgur some form-data and an API key, as a little treat.
+
 async function imgurUploadArt(imgBuf, albumInput, callback) {
     outputLog(logTypes.info, "Uploading album art to Imgur.")
     var config = {
         headers: { 'Authorization': `Client-ID ${configParams.imgurImage.imgurClientId}` }
     }
     const form = new FormData();
-    const fileName = await makeFileID()
+    const fileName = await makeFileID(12)
     form.append(configParams.imgurImage.imgurUploadKey, imgBuf, {filename: `${fileName}.jpg`});
     form.append('type', configParams.imgurImage.imgurFileType)
     axios.post(configParams.imgurImage.imgurUrl, form, config).then(({data}) => {
@@ -380,10 +392,12 @@ async function imgurUploadArt(imgBuf, albumInput, callback) {
     })
 }
 
+//if you're selfhosting, good for you. I like that.
+
 async function selfUploadArt(imgBuf, albumInput, callback) {
     outputLog(logTypes.info, "Uploading album art to self-hosted service.")
     const form = new FormData();
-    const fileName = await makeFileID()
+    const fileName = await makeFileID(12)
     form.append('file', Buffer.from(imgBuf), {filename: `${fileName}.jpg`});
     form.append('type', configParams.selfServiceImage.formImageType)
     if (configParams.selfServiceImage.endpointAuthTokenType !== "") {
@@ -411,6 +425,8 @@ async function selfUploadArt(imgBuf, albumInput, callback) {
     }
 }
 
+//just to save some bandwidth, let's cache those links in a little json file to call later.
+
 function cacheArtUrl(artLink, albumInput, source) {
     cachedArt.push({"album": albumInput, "link": artLink})
     fs.writeFile("cached_art.json", JSON.stringify(cachedArt), (err) => {
@@ -421,6 +437,7 @@ function cacheArtUrl(artLink, albumInput, source) {
     });
 }
 
+//let's look for an album in cache before we go any further
 
 async function findInCache(cache, albumInput) {
     const cacheSearch = cache.find(({ album }) => album === albumInput);
@@ -430,6 +447,8 @@ async function findInCache(cache, albumInput) {
         return false;
     }
 }
+
+//random alphanumeric file name generator cause why not?
 
 async function makeFileID(length) {
     let result = '';
