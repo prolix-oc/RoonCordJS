@@ -63,14 +63,9 @@ if (fs.existsSync('options.json')) {
     if (response.status == 200){
         const fileData = Buffer.from(response.data, 'binary');
         outputLog(logTypes.ok, 'Downloaded standard options file from GitHub...');
-        fs.writeFileSync("options.json", JSON.parse(fileData), (err) => {
-            if (err)
-                outputLog(logTypes.error, "Error creating options file on local disk: " + err)
-            else {
-                outputLog(logTypes.ok, "Standard options file successfully created! Be sure to check the README before making any modifications.")
-                configParams = JSON.parse(fileData.toString())
-            }
-        });
+        fs.writeFileSync("options.json", fileData);
+        outputLog(logTypes.ok, "Standard options file successfully created! Be sure to check the README before making any modifications.");
+        configParams = JSON.parse(fileData.toString());
     } else {
         outputLog(logTypes.error, "Could not download standard options file automatically. Please download the latest config from GitHub and place it locally.")
         outputLog(logTypes.error, "You may want to investigate any potential internet connection problems or check if GitHub is blocked.")
@@ -174,12 +169,12 @@ const client = new Client({
 
 const extension = new RoonExtension({
         description: {
-        extension_id:        'live.prolix.RoonCordJS',
+        extension_id:        'live.celiswen.RoonCordJS',
         display_name:        "Pass Roon's now playing info to Discord RPC via Node.js",
-        display_version:     "0.0.1",
+        display_version:     "0.0.2",
         publisher:           'RoonCord JS',
-        email:               'me@prolix.live',
-        website:             'https://github.com/prolix-oc/RoonCordJS'
+        email:               'me@celiswen.org',
+        website:             'https://github.com/celiswen/RoonCordJS'
     },
     RoonApiBrowse: 'not_required',
     RoonApiImage: 'required',
@@ -193,7 +188,12 @@ const extension = new RoonExtension({
 extension.start_discovery();
 extension.set_status(`Connecting to all services...`);
 
-const core = await extension.get_core();
+try {
+    const core = await extension.get_core();
+} catch (err) {
+    outputLog(logTypes.error, "Failed to connect to Roon Core: " + err.message);
+    console.error(err);  // For full stack trace
+}
 await client.login();
 extension.set_status(`Sending RPC data to ${client.user.username} currently!`);
 
@@ -201,58 +201,63 @@ outputLog(logTypes.ok, "Roon connection fully established!")
 
 //start getting info from Roon core and do something with it.
 
+let debounceTimeout = null;
+let lastZoneUpdate = {};  // Track last update time per zone
+
 extension.on("subscribe_zones", (core, response, body) => {
-    const addedZones = body.zones ?? body.zones_added ?? [];
-    addedZones.forEach(zone => {
-        trackInfo["song"] = zone.now_playing?.three_line.line1;
-        trackInfo["artist"] = zone.now_playing?.three_line.line2;
-        trackInfo["album"] = zone.now_playing?.three_line.line3;
-        trackInfo["playback_status"] = zone.state;
-        trackInfo["image_key"] = zone.now_playing?.image_key;
-        trackInfo["zone_name"] = zone.display_name;
-        outputLog(logTypes.info, `Zone ${zone.display_name} has updated.`)
-        startAlbumArtOperation(zone.now_playing?.image_key, zone.now_playing?.three_line.line3, zone.now_playing?.three_line.line2, "init")
-        switch(determinePlaybackStatus().status) {
-            case "playing":
-                previousSecond = Math.round(Date.now() / 1000)
-                trackSeconds = previousSecond + parseInt(zone.now_playing?.length)
-                break;
-            case "paused":
-                previousSecond = Math.round(Date.now() / 1000)
-                trackSeconds = Math.round(Date.now() / 1000)
-            default:
-                break;
-        }
-    });
+    if (!body) {
+        outputLog(logTypes.warning, "Received subscribe_zones update with empty body—skipping.");
+        return;
+    }
 
-    const removedZones = body.zones_removed ?? [];
-    removedZones.forEach(zone => {
-        outputLog(logTypes.info, `Zone ${zone.display_name} has stopped it's playback.`)
-    }); 
+    // Debounce: Clear any pending timeout and set a new one
+    if (debounceTimeout) {
+        clearTimeout(debounceTimeout);
+    }
+    debounceTimeout = setTimeout(() => {
+        const addedZones = body.zones ?? body.zones_added ?? [];
+        addedZones.forEach(zone => processZoneUpdate(zone, 'added'));
 
-    const changedZones = body.zones_changed ?? [];
-    changedZones.forEach(zone => {
-        trackInfo["song"] = zone.now_playing?.three_line.line1;
-        trackInfo["artist"] = zone.now_playing?.three_line.line2;
-        trackInfo["album"] = zone.now_playing?.three_line.line3;
-        trackInfo["playback_status"] = zone.state;
-        trackInfo["image_key"] = zone.now_playing?.image_key;
-        trackInfo["zone_name"] = zone.display_name;
-        outputLog(logTypes.info, `Zone ${zone.display_name} has updated.`)
-        startAlbumArtOperation(zone.now_playing?.image_key, zone.now_playing?.three_line.line3, zone.now_playing?.three_line.line2, "init")
-        switch(determinePlaybackStatus().status) {
-            case "playing":
-                previousSecond = Math.round(Date.now() / 1000)
-                trackSeconds = previousSecond + parseInt(zone.now_playing?.length)
-                break;
-            case "paused":
-                previousSecond = Math.round(Date.now() / 1000)
-                trackSeconds = Math.round(Date.now() / 1000)
-            default:
-                break;
-        }
-    });
+        const removedZones = body.zones_removed ?? [];
+        removedZones.forEach(zone => {
+            outputLog(logTypes.info, `Zone ${zone.display_name} has stopped its playback.`);
+        });
+
+        const changedZones = body.zones_changed ?? [];
+        changedZones.forEach(zone => processZoneUpdate(zone, 'changed'));
+    }, 500);  // 500ms debounce window—adjust if needed
 });
+
+// Helper function to process zone updates with duplicate check
+function processZoneUpdate(zone, type) {
+    const now = Date.now();
+    const zoneId = zone.zone_id || zone.display_name;  // Use ID if available, fallback to name
+    if (lastZoneUpdate[zoneId] && now - lastZoneUpdate[zoneId] < 1000) {  // Skip if updated <1s ago
+        outputLog(logTypes.info, `Skipping duplicate ${type} update for zone ${zone.display_name}.`);
+        return;
+    }
+    lastZoneUpdate[zoneId] = now;
+
+    trackInfo["song"] = zone.now_playing?.three_line.line1 || "Unknown";
+    trackInfo["artist"] = zone.now_playing?.three_line.line2 || "Unknown";
+    trackInfo["album"] = zone.now_playing?.three_line.line3 || "Unknown";
+    trackInfo["playback_status"] = zone.state;
+    trackInfo["image_key"] = zone.now_playing?.image_key;
+    trackInfo["zone_name"] = zone.display_name;
+    outputLog(logTypes.info, `Zone ${zone.display_name} has updated (${type}).`);
+    startAlbumArtOperation(zone.now_playing?.image_key, zone.now_playing?.three_line.line3, zone.now_playing?.three_line.line2, "init");
+    switch(determinePlaybackStatus().status) {
+        case "playing":
+            previousSecond = Math.round(Date.now() / 1000);
+            trackSeconds = previousSecond + parseInt(zone.now_playing?.length || 0);
+            break;
+        case "paused":
+            previousSecond = Math.round(Date.now() / 1000);
+            trackSeconds = Math.round(Date.now() / 1000);
+        default:
+            break;
+    }
+}
 
 //figure out if we're played or paused to update the small image
 
@@ -294,9 +299,18 @@ client.on("ready", async () => {
 //function to make repeated RPC calls
 
 async function updateRPC(artlink) {
+    let fullState = trackInfo["artist"] + " — " + trackInfo["album"];
+    let state = fullState.length > 125 ? fullState.substring(0, 125) + "..." : fullState;
+    let details = trackInfo["song"];
+    if (details.length < 2) {
+        details += " ".repeat(2 - details.length);  // Pad with spaces to min 2 chars
+        outputLog(logTypes.info, "Song title \"" + trackInfo["song"] + "\" too short—padding with spaces.");
+    } else if (details.length > 125) {
+        details = details.substring(0, 125) + "...";
+    }
     await client.user?.setActivity({
-        state: trackInfo["artist"] + " — " + trackInfo["album"],
-        details: trackInfo["song"],
+        state: state,
+        details: details,
         startTimestamp: previousSecond,
         endTimestamp: trackSeconds,
         largeImageKey: artlink,
@@ -349,26 +363,32 @@ async function startAlbumArtOperation(albumartString, albumInput, artistString, 
 //convoluted MusicBrainz to Cover Art Archive search function
 
 async function fetchFromMusicBrainz(artistString, albumInput, callback) {
-    outputLog(logTypes.info, "Returning match from MusicBrainz to RPC.")
+    outputLog(logTypes.info, "Returning match from MusicBrainz to RPC.");
     const encodedArtist = encodeURIComponent(artistString);
     const encodedAlbum = encodeURIComponent(albumInput);
     const searchUrl = "https://musicbrainz.org/ws/2/release/?query=artist:" + encodedArtist + "+release:" + encodedAlbum + "&fmt=json"; 
-    axios.get(searchUrl).then(({data}) => {  
-        outputLog(logTypes.ok, "Found MusicBrainz match, searching release on Cover Art Archive.")
-        const imageUrl = `http://coverartarchive.org/release/${data.releases[0].id}/`;
-        axios.get(imageUrl).then(({data}) => {
-            outputLog(logTypes.ok, "Found CAA match, returning image.")
-            callback({"link": data.images[0].thumbnails.large, "success": true});
-        }).catch(function (err) {
-            outputLog(logTypes.error, "Could not get album art from CAA. Bit odd, you must have niche music taste. ;)")
-            outputLog(logTypes.error, `Specific error: ${err}`)
-            callback({"link": "main", "success": false});
-        })
-    }).catch(function (err) {
-        outputLog(logTypes.error, "Could not get result from MusicBrainz. Bit odd, you must have niche music taste. ;)")
-        outputLog(logTypes.error, `Specific error: ${err}`)
-        callback({"link": "main", "success": false});
-    })
+
+    for (let retry = 1; retry <= 3; retry++) {
+        try {
+            const mbResponse = await axios.get(searchUrl);
+            const mbData = mbResponse.data;
+            outputLog(logTypes.ok, "Found MusicBrainz match, searching release on Cover Art Archive.");
+
+            const imageUrl = `http://coverartarchive.org/release/${mbData.releases[0].id}/`;
+            const caaResponse = await axios.get(imageUrl);
+            outputLog(logTypes.ok, "Found CAA match, returning image.");
+            callback({"link": caaResponse.data.images[0].thumbnails.large, "success": true});
+            return;  // Success, exit early
+        } catch (err) {
+            outputLog(logTypes.warning, `Attempt ${retry}/3 failed: ${err.message}`);
+            if (retry === 3) {
+                outputLog(logTypes.ok, "Failed after 3 attempts. Using default image.");
+                callback({"link": "main", "success": false});
+                return;
+            }
+            await new Promise(resolve => setTimeout(resolve, 2000));  // Wait 2 seconds
+        }
+    }
 }
 
 //let's give Imgur some form-data and an API key, as a little treat.
